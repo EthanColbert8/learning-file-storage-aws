@@ -44,6 +44,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Couldn't read file data", err)
 		return
 	}
+	defer newFile.Close()
 
 	fileType := newFileHeader.Header.Get("Content-Type")
 	if fileType == "" {
