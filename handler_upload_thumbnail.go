@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -101,14 +102,19 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
  * into a usable file extension.
  */
 func readContentType(ts string) (string, error) {
-	parts := strings.Split(ts, "/")
-
-	if len(parts) != 2 {
-		return "", fmt.Errorf("Not a valid image content type: %s", ts)
+	mediaType, _, err := mime.ParseMediaType(ts)
+	if err != nil {
+		return "", fmt.Errorf("found invalid media type: %w", err)
 	}
 
+	parts := strings.Split(mediaType, "/")
+
 	if parts[0] != "image" {
-		return "", fmt.Errorf("Not a valid image content type: %s", ts)
+		return "", fmt.Errorf("Not a valid image type: %s", mediaType)
+	}
+
+	if parts[1] != "png" && parts[1] != "jpeg" {
+		return "", fmt.Errorf("Not a valid thumbnail type: %s", mediaType)
 	}
 
 	return parts[1], nil
