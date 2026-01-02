@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -53,12 +55,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	fileData, err := io.ReadAll(newFile)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to read file data", err)
-		return
-	}
-
 	videoMetadata, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Couldn't find video data", err)
@@ -71,18 +67,49 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// newThumbnail := thumbnail{
-	// 	mediaType: fileType,
-	// 	data:      fileData,
-	// }
-	// videoThumbnails[videoID] = newThumbnail
-	imgString := base64.StdEncoding.EncodeToString(fileData)
+	fileExtension, err := readContentType(fileType)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid file metadata", err)
+		return
+	}
 
-	//newURL := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID)
-	newURL := fmt.Sprintf("data:%s;base64,%s", fileType, imgString)
+	newFilePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s.%s", videoID, fileExtension))
+
+	newFileCopy, err := os.Create(newFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create local thumbnail file", err)
+		return
+	}
+	defer newFileCopy.Close()
+
+	_, err = io.Copy(newFileCopy, newFile)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to save thumbnail data", err)
+		return
+	}
+
+	newURL := fmt.Sprintf("http://localhost:%s/assets/%s.%s", cfg.port, videoID, fileExtension)
 
 	videoMetadata.ThumbnailURL = &newURL
 	cfg.db.UpdateVideo(videoMetadata)
 
 	respondWithJSON(w, http.StatusOK, videoMetadata)
+}
+
+/*
+ * A helper function to read the "Content-Type" header on form data
+ * into a usable file extension.
+ */
+func readContentType(ts string) (string, error) {
+	parts := strings.Split(ts, "/")
+
+	if len(parts) != 2 {
+		return "", fmt.Errorf("Not a valid image content type: %s", ts)
+	}
+
+	if parts[0] != "image" {
+		return "", fmt.Errorf("Not a valid image content type: %s", ts)
+	}
+
+	return parts[1], nil
 }
