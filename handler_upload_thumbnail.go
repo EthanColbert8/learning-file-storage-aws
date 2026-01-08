@@ -39,6 +39,18 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
+	videoMetadata, err := cfg.db.GetVideo(videoID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't find video data", err)
+		return
+	}
+
+	// validate that authenticated user owns the video
+	if videoMetadata.CreateVideoParams.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "User is not owner of video", nil)
+		return
+	}
+
 	err = r.ParseMultipartForm(maxMemory)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Improper form body", err)
@@ -54,23 +66,11 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	fileType := newFileHeader.Header.Get("Content-Type")
 	if fileType == "" {
-		respondWithError(w, http.StatusBadRequest, "Improper file metadata", err)
+		respondWithError(w, http.StatusBadRequest, "Improper file metadata", nil)
 		return
 	}
 
-	videoMetadata, err := cfg.db.GetVideo(videoID)
-	if err != nil {
-		respondWithError(w, http.StatusNotFound, "Couldn't find video data", err)
-		return
-	}
-
-	// validate that authenticated user owns the video
-	if videoMetadata.CreateVideoParams.UserID != userID {
-		respondWithError(w, http.StatusUnauthorized, "User is not owner of video", nil)
-		return
-	}
-
-	fileExtension, err := readContentType(fileType)
+	fileExtension, err := readImageContentType(fileType)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid file metadata", err)
 		return
@@ -108,7 +108,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
  * A helper function to read the "Content-Type" header on form data
  * into a usable file extension.
  */
-func readContentType(ts string) (string, error) {
+func readImageContentType(ts string) (string, error) {
 	mediaType, _, err := mime.ParseMediaType(ts)
 	if err != nil {
 		return "", fmt.Errorf("found invalid media type: %w", err)
