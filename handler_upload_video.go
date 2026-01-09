@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/content"
 	"github.com/google/uuid"
 )
 
@@ -97,7 +98,14 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	rand.Read(randBytes)
 	newFileName := base64.RawURLEncoding.EncodeToString(randBytes)
 
-	newFileKey := fmt.Sprintf("%s.%s", newFileName, fileExtension)
+	// prefix will be "landscape", "portrait", or "other" if no error
+	newFilePrefix, err := content.GetVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to read video data", err)
+		return
+	}
+
+	newFileKey := fmt.Sprintf("%s/%s.%s", newFilePrefix, newFileName, fileExtension)
 	contentMimeType := fmt.Sprintf("video/%s", fileExtension)
 
 	putObjectInput := s3.PutObjectInput{
