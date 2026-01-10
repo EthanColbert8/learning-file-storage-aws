@@ -84,26 +84,45 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
+	// defer tempFile.Close() // Closed explicitly after data is copied in
 
 	_, err = io.Copy(tempFile, newFile)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to upload file", err)
 		return
 	}
-	tempFile.Seek(0, io.SeekStart) // resets file pointer to beginning for reading
+	// tempFile.Seek(0, io.SeekStart) // resets file pointer to beginning for reading
+
+	// Explicitly closing our handle to the file here, since we don't need it anymore
+	// but ffmpeg will when it does preprocessing
+	tempFile.Close()
+
+	// Moves the "moov" atom to the front of the video file, for faster streaming start
+	processedTempFilePath, err := content.ProcessVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to preprocess video", err)
+		return
+	}
+	defer os.Remove(processedTempFilePath)
+
+	// prefix will be "landscape", "portrait", or "other" if no error
+	newFilePrefix, err := content.GetVideoAspectRatio(processedTempFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to read video aspect ratio", err)
+		return
+	}
+
+	processedTempFile, err := os.Open(processedTempFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to open preprocessed video file", err)
+		return
+	}
+	defer processedTempFile.Close()
 
 	// read a random name for the new file
 	randBytes := make([]byte, 32)
 	rand.Read(randBytes)
 	newFileName := base64.RawURLEncoding.EncodeToString(randBytes)
-
-	// prefix will be "landscape", "portrait", or "other" if no error
-	newFilePrefix, err := content.GetVideoAspectRatio(tempFile.Name())
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to read video data", err)
-		return
-	}
 
 	newFileKey := fmt.Sprintf("%s/%s.%s", newFilePrefix, newFileName, fileExtension)
 	contentMimeType := fmt.Sprintf("video/%s", fileExtension)
@@ -111,7 +130,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	putObjectInput := s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &newFileKey,
-		Body:        tempFile,
+		Body:        processedTempFile,
 		ContentType: &contentMimeType,
 	}
 
