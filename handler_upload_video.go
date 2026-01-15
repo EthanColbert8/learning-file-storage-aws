@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -8,10 +9,13 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/content"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/google/uuid"
 )
 
@@ -140,11 +144,62 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	newURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, newFileKey)
+	// newURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, newFileKey)
+	newURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, newFileKey)
 	videoMetadata.VideoURL = &newURL
 	cfg.db.UpdateVideo(videoMetadata)
 
-	respondWithJSON(w, http.StatusOK, videoMetadata)
+	newVideoMetadata, err := cfg.dbVideoToSignedVideo(videoMetadata)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to generate URL for video access", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, newVideoMetadata)
+}
+
+/**
+ * A helper method to get a presigned URL for a given video resource.
+ */
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	if video.VideoURL == nil {
+		// return database.Video{}, fmt.Errorf("video URL was a nil pointer, so BINGO")
+		return video, nil
+	}
+
+	parts := strings.Split(*video.VideoURL, ",")
+	if len(parts) != 2 {
+		return database.Video{}, fmt.Errorf("malformed video URL: %s", *video.VideoURL)
+	}
+	bucket := parts[0]
+	key := parts[1]
+
+	presignedURL, err := generatePresignedURL(cfg.s3Client, bucket, key, 60*time.Minute)
+	if err != nil {
+		return database.Video{}, fmt.Errorf("failed to get presigned video URL: %w", err)
+	}
+
+	video.VideoURL = &presignedURL
+	return video, nil
+}
+
+/**
+ * A helper function to generate a signed request for contents from a private S3 bucket.
+ */
+func generatePresignedURL(s3Client *s3.Client, bucket, key string, expireTime time.Duration) (string, error) {
+	presignClient := s3.NewPresignClient(s3Client)
+
+	objectInfo := s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	}
+
+	presignedRequest, err := presignClient.PresignGetObject(context.Background(), &objectInfo, s3.WithPresignExpires(expireTime))
+	if err != nil {
+		return "", fmt.Errorf("failed to get presigned object request: %w", err)
+	}
+
+	return presignedRequest.URL, nil
 }
 
 /*
