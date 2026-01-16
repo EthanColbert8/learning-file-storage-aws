@@ -95,13 +95,7 @@ func (cfg *apiConfig) handlerVideoGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newVideo, err := cfg.dbVideoToSignedVideo(video)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Failed to generate URL for video access", err)
-		return
-	}
-
-	respondWithJSON(w, http.StatusOK, newVideo)
+	respondWithJSON(w, http.StatusOK, video)
 }
 
 func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Request) {
@@ -122,16 +116,5 @@ func (cfg *apiConfig) handlerVideosRetrieve(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	newVideos := make([]database.Video, 0, len(videos))
-	for _, v := range videos {
-		newVideo, err := cfg.dbVideoToSignedVideo(v)
-		if err != nil {
-			respondWithError(w, http.StatusInternalServerError, "Failed to generate URL for video access", err)
-			return
-		}
-
-		newVideos = append(newVideos, newVideo)
-	}
-
-	respondWithJSON(w, http.StatusOK, newVideos)
+	respondWithJSON(w, http.StatusOK, videos)
 }
